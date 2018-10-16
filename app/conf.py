@@ -1,81 +1,62 @@
-"""Load configuration from default-config.json or env
+"""Load configuration from environment
 """
 
 import os
-import json
-import distutils.util
-from string import whitespace
 
-import ccxt # Only uses ccxt to get exchanges, never queries them.
+import ccxt
+import yaml
 
 class Configuration():
-    """Parses the various forms of configuration to create the config objects.
+    """Parses the environment configuration to create the config objects.
     """
+
     def __init__(self):
         """Initializes the Configuration class
         """
 
-        config = json.load(open('default-config.json'))
+        with open('defaults.yml', 'r') as config_file:
+            default_config = yaml.load(config_file)
+
+        if os.path.isfile('config.yml'):
+            with open('config.yml', 'r') as config_file:
+                user_config = yaml.load(config_file)
+        else:
+            user_config = dict()
+
+        if 'settings' in user_config:
+            self.settings = {**default_config['settings'], **user_config['settings']}
+        else:
+            self.settings = default_config['settings']
+
+        if 'notifiers' in user_config:
+            self.notifiers = {**default_config['notifiers'], **user_config['notifiers']}
+        else:
+            self.notifiers = default_config['notifiers']
+
+        if 'indicators' in user_config:
+            self.indicators = {**default_config['indicators'], **user_config['indicators']}
+        else:
+            self.indicators = default_config['indicators']
+
+        if 'informants' in user_config:
+            self.informants = {**default_config['informants'], **user_config['informants']}
+        else:
+            self.informants = default_config['informants']
+
+        if 'crossovers' in user_config:
+            self.crossovers = {**default_config['crossovers'], **user_config['crossovers']}
+        else:
+            self.crossovers = default_config['crossovers']
+
+        if 'exchanges' in user_config:
+            self.exchanges = user_config['exchanges']
+        else:
+            self.exchanges = dict()
 
         for exchange in ccxt.exchanges:
-            if not exchange in config['exchanges']:
-                config['exchanges'][exchange] = {
+            if exchange not in self.exchanges:
+                self.exchanges[exchange] = {
                     'required': {
                         'enabled': False
                     }
                 }
-
-        user_config_file = 'config.json'
-        user_config = json.load(open(user_config_file)) if os.path.isfile(user_config_file) else {}
-        config.update(user_config)
-
-        config['settings'] = self.__parse_config(config['settings'], 'SETTINGS')
-        self.settings = config['settings']
-
-        config['database'] = self.__parse_config(config['database'], 'DATABASE')
-        self.database = config['database']
-
-        config['exchanges'] = self.__parse_config(config['exchanges'], 'EXCHANGES')
-        self.exchanges = config['exchanges']
-
-        config['notifiers'] = self.__parse_config(config['notifiers'], 'NOTIFIERS')
-        self.notifiers = config['notifiers']
-
-        config['behaviours'] = self.__parse_config(config['behaviours'], 'BEHAVIOURS')
-        self.behaviours = config['behaviours']
-
-    def __parse_config(self, config_fragment, base_path=""):
-        for key in config_fragment:
-
-            if isinstance(config_fragment[key], str):
-                key_path = '_'.join([base_path, key.upper()])
-                config_fragment[key] = str(os.environ.get(key_path, config_fragment[key]))
-
-            if isinstance(config_fragment[key], dict):
-                key_path = '_'.join([base_path, key.upper()])
-                config_fragment[key] = self.__parse_config(config_fragment[key], key_path)
-
-            if isinstance(config_fragment[key], int):
-                key_path = '_'.join([base_path, key.upper()])
-                new_value = int(os.environ.get(key_path, config_fragment[key]))
-                config_fragment[key] = new_value
-
-            if isinstance(config_fragment[key], float):
-                key_path = '_'.join([base_path, key.upper()])
-                new_value = float(os.environ.get(key_path, config_fragment[key]))
-                config_fragment[key] = new_value
-
-            if isinstance(config_fragment[key], list):
-                key_path = '_'.join([base_path, key.upper()])
-                new_value = os.environ.get(key_path, config_fragment[key])
-                if isinstance(new_value, str):
-                    new_value = new_value.translate(str.maketrans('', '', whitespace)).split(",")
-
-                config_fragment[key] = new_value
-
-            if isinstance(config_fragment[key], bool):
-                key_path = '_'.join([base_path, key.upper()])
-                new_value = os.environ.get(key_path, config_fragment[key])
-                new_value = bool(distutils.util.strtobool(new_value))
-
-        return config_fragment

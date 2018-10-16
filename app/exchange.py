@@ -1,10 +1,14 @@
 """Interface for performing queries against exchange API's
 """
 
+import re
+import sys
 import time
+from datetime import datetime, timedelta, timezone
 
 import ccxt
 import structlog
+from tenacity import retry, retry_if_exception_type, stop_after_attempt
 
 class ExchangeInterface():
     """Interface for performing queries against exchange API's
@@ -18,182 +22,130 @@ class ExchangeInterface():
         """
 
         self.logger = structlog.get_logger()
-        self.exchanges = {}
+        self.exchanges = dict()
 
         # Loads the exchanges using ccxt.
         for exchange in exchange_config:
             if exchange_config[exchange]['required']['enabled']:
                 new_exchange = getattr(ccxt, exchange)({
-                    "enableRateLimit": True # Enables built-in rate limiter
+                    "enableRateLimit": True
                 })
 
                 # sets up api permissions for user if given
                 if new_exchange:
-                    if 'key' in exchange_config[exchange]['optional']:
-                        new_exchange.apiKey = exchange_config[exchange]['optional']['key']
-
-                    if 'secret' in exchange_config[exchange]['optional']:
-                        new_exchange.secret = exchange_config[exchange]['optional'][
-                            'secret']
-
-                    if 'username' in exchange_config[exchange]['optional']:
-                        new_exchange.username = exchange_config[exchange]['optional'][
-                            'username']
-
-                    if 'password' in exchange_config[exchange]['optional']:
-                        new_exchange.password = exchange_config[exchange]['optional'][
-                            'password']
-
                     self.exchanges[new_exchange.id] = new_exchange
-
                 else:
-                    print("Unable to load exchange %s", new_exchange)
+                    self.logger.error("Unable to load exchange %s", new_exchange)
 
 
-    def get_historical_data(self, market_pair, exchange, time_unit, start_date):
+    @retry(retry=retry_if_exception_type(ccxt.NetworkError), stop=stop_after_attempt(3))
+    def get_historical_data(self, market_pair, exchange, time_unit, start_date=None, max_periods=100):
         """Get historical OHLCV for a symbol pair
+
+        Decorators:
+            retry
 
         Args:
             market_pair (str): Contains the symbol pair to operate on i.e. BURST/BTC
             exchange (str): Contains the exchange to fetch the historical data from.
             time_unit (str): A string specifying the ccxt time unit i.e. 5m or 1d.
-            start_date (int): Timestamp in milliseconds.
+            start_date (int, optional): Timestamp in milliseconds.
+            max_periods (int, optional): Defaults to 100. Maximum number of time periods
+              back to fetch data for.
 
         Returns:
             list: Contains a list of lists which contain timestamp, open, high, low, close, volume.
         """
 
-        historical_data = []
-        historical_data.append(
-            self.exchanges[exchange].fetch_ohlcv(
-                market_pair,
-                timeframe=time_unit,
-                since=start_date
+        try:
+            if time_unit not in self.exchanges[exchange].timeframes:
+                raise ValueError(
+                    "{} does not support {} timeframe for OHLCV data. Possible values are: {}".format(
+                        exchange,
+                        time_unit,
+                        list(self.exchanges[exchange].timeframes)
+                    )
+                )
+        except AttributeError:
+            self.logger.error(
+                '%s interface does not support timeframe queries! We are unable to fetch data!',
+                exchange
             )
+            raise AttributeError(sys.exc_info())
+
+        if not start_date:
+            timeframe_regex = re.compile('([0-9]+)([a-zA-Z])')
+            timeframe_matches = timeframe_regex.match(time_unit)
+            time_quantity = timeframe_matches.group(1)
+            time_period = timeframe_matches.group(2)
+
+            timedelta_values = {
+                'm': 'minutes',
+                'h': 'hours',
+                'd': 'days',
+                'w': 'weeks',
+                'M': 'months',
+                'y': 'years'
+            }
+
+            timedelta_args = { timedelta_values[time_period]: int(time_quantity) }
+
+            start_date_delta = timedelta(**timedelta_args)
+
+            max_days_date = datetime.now() - (max_periods * start_date_delta)
+            start_date = int(max_days_date.replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+        historical_data = self.exchanges[exchange].fetch_ohlcv(
+            market_pair,
+            timeframe=time_unit,
+            since=start_date
         )
+
+        if not historical_data:
+            raise ValueError('No historical data provided returned by exchange.')
+
+        # Sort by timestamp in ascending order
+        historical_data.sort(key=lambda d: d[0])
+
         time.sleep(self.exchanges[exchange].rateLimit / 1000)
-        return historical_data[0]
+
+        return historical_data
 
 
-    def get_account_markets(self, exchange):
-        """Get the symbol pairs listed within a users account.
+    @retry(retry=retry_if_exception_type(ccxt.NetworkError), stop=stop_after_attempt(3))
+    def get_exchange_markets(self, exchanges=[], markets=[]):
+        """Get market data for all symbol pairs listed on all configured exchanges.
 
         Args:
-            exchange (str): Contains the exchange to fetch the data from.
+            markets (list, optional): A list of markets to get from the exchanges. Default is all
+                markets.
+            exchanges (list, optional): A list of exchanges to collect market data from. Default is
+                all enabled exchanges.
 
-        Returns:
-            dict: A dictionary containing market data for the symbol pairs.
-        """
-
-        account_markets = {}
-        account_markets.update(self.exchanges[exchange].fetch_balance())
-        time.sleep(self.exchanges[exchange].rateLimit / 1000)
-        return account_markets
-
-
-    def get_exchange_markets(self):
-        """Get market data for all symbol pairs listed on all configured exchanges.
+        Decorators:
+            retry
 
         Returns:
             dict: A dictionary containing market data for all symbol pairs.
         """
 
-        exchange_markets = {}
-        for exchange in self.exchanges:
+        if not exchanges:
+            exchanges = self.exchanges
+
+        exchange_markets = dict()
+        for exchange in exchanges:
             exchange_markets[exchange] = self.exchanges[exchange].load_markets()
+
+            if markets:
+                curr_markets = exchange_markets[exchange]
+
+                # Only retrieve markets the users specified
+                exchange_markets[exchange] = { key: curr_markets[key] for key in curr_markets if key in markets }
+
+                for market in markets:
+                    if market not in exchange_markets[exchange]:
+                        self.logger.info('%s has no market %s, ignoring.', exchange, market)
+
             time.sleep(self.exchanges[exchange].rateLimit / 1000)
+
         return exchange_markets
-
-
-    def get_symbol_markets(self, market_pairs):
-        """Get market data for specific symbols on all configured exchanges.
-
-        Args:
-            market_pairs (list): The symbol pairs you want to retrieve market data for.
-
-        Returns:
-            dict: A dictionary containing market data for requested symbol pairs.
-        """
-
-        symbol_markets = {}
-        for exchange in self.exchanges:
-            self.exchanges[exchange].load_markets()
-            symbol_markets[exchange] = {}
-
-            for market_pair in market_pairs:
-                symbol_markets[exchange][market_pair] = self.exchanges[exchange].markets[
-                    market_pair]
-            time.sleep(self.exchanges[exchange].rateLimit / 1000)
-        return symbol_markets
-
-
-    def get_order_book(self, market_pair, exchange):
-        """Retrieve the order information for a particular symbol pair.
-
-        Args:
-            market_pair (str): Contains the symbol pair to operate on i.e. BURST/BTC
-            exchange (str): Contains the exchange to fetch the data from.
-
-        Returns:
-            dict: A dictionary containing bid, ask and other order information on a pair.
-        """
-
-        return self.exchanges[exchange].fetch_order_book(market_pair)
-
-    def get_open_orders(self):
-        """Get the users currently open orders on all configured exchanges.
-
-        Returns:
-            dict: A dictionary containing open order information.
-        """
-
-        open_orders = {}
-        for exchange in self.exchanges:
-            open_orders[exchange] = self.exchanges[exchange].fetch_open_orders()
-            time.sleep(self.exchanges[exchange].rateLimit / 1000)
-        return open_orders
-
-    def cancel_order(self, exchange, order_id):
-        """Cancels an open order on a particular exchange.
-
-        Args:
-            exchange (str): Contains the exchange to cancel the order on.
-            order_id (str): The order id you want to cancel.
-        """
-
-        self.exchanges[exchange].cancel_order(order_id)
-        time.sleep(self.exchanges[exchange].rateLimit / 1000)
-
-    def get_quote_symbols(self, exchange):
-        """Get a list of quote symbols on an exchange.
-
-        Args:
-            exchange (str): Contains the exchange to fetch the data from.
-
-        Returns:
-            list: List of quote symbols on an exchange.
-        """
-
-        quote_symbols = []
-        for market_pair in self.exchanges[exchange].markets:
-            _, quote_symbol = market_pair.split('/')
-            if not quote_symbol in quote_symbols:
-                quote_symbols.append(quote_symbol)
-
-        return quote_symbols
-
-    def get_btc_value(self, exchange, base_symbol, volume):
-
-        btc_value = 0
-        market_pair = base_symbol + "/BTC"
-
-        try:
-            order_book = self.get_order_book(market_pair, exchange)
-            bid = order_book['bids'][0][0] if order_book['bids'] else None
-            if bid:
-                btc_value = bid * volume
-
-        except ccxt.BaseError:
-            self.logger.warn("Unable to get btc value for %s", base_symbol)
-
-        return btc_value

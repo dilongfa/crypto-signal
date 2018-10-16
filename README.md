@@ -1,24 +1,30 @@
 # Crypto Signals
 
-### Development state: Alpha (There are many bugs and documentation is often lagging)
+### Development state: Beta (Code is stable, documentation is often lagging)
 
-Crypto Signals is a command line tool that automates your crypto currency Technical Analysis (TA) and trading.
+### Join our community [Discord](https://discord.gg/MWTJVFf) channel!
+
+Crypto Signals is a command line tool that automates your crypto currency Technical Analysis (TA).
 
 Track over 500 coins across Bittrex, Bitfinex, GDAX, Gemini and more!
 
 Technical Analysis Automated:
+* Momentum
 * Relative Strength Index (RSI)
 * Ichimoku Cloud (Leading Span A, Leading Span B, Conversion Line, Base Line)
 * Simple Moving Average
 * Exponential Moving Average
-* Breakouts / Pumps
 * MACD
+* MFI
+* OBV
+* VWAP
 
 Alerts:
 * SMS via Twilio
 * Email
 * Slack
 * Telegram
+* Discord
 
 Features:
 * Modular code for easy trading strategy implementation
@@ -26,117 +32,36 @@ Features:
 
 You can build on top of this tool and implement algorithm trading and some machine learning models to experiment with predictive analysis.
 
-Coming Soon:
-* Automated buying/selling
+## Installing And Running
+The commands listed below are intended to be run in a terminal.
 
+1. Install [docker CE](https://docs.docker.com/install/)
 
-# How to use (Docker)
-* First make sure you have [Docker installed](https://docs.docker.com/engine/installation/)
-* Next, to create the docker image run `make build` in the root of the project directory.
-* Create a .env file which can be populated with settings in the format of OPTION=value which can be derived from the app/default-config.json file. For example if you want to change the how often it updates add SETTINGS\_UPDATE\_INTERVAL=600
-* For lists of values separate them with commas. For instance if you want to use specific symbol pairs they are in the format of base\_currency/quote\_currency (i.e. SETTINGS\_MARKET\_PAIRS=BTC/ETH,BTC/USDT)
+1. Create a config.yml file in your current directory. See the Configuring config.yml section below for customizing settings.
 
-## How to run
-In the root directory run `docker-compose run app` or `make build && make run --env-file=.env` if you don't have docker-compose.
+1. In a terminal run the application. `docker run --rm -v $PWD/config.yml:/app/config.yml shadowreaver/crypto-signal:master`.
 
-# How to use (Local)
-To install the dependencies for this project, perform the following...
-- Ensure you are running python 3.6
-- install TA-lib from https://www.ta-lib.org/ for your OS.
-- `cd app`
-- `pip install numpy==1.14.0`
-- `pip install -r requirements.txt`
+1. When you want to update the application run `docker pull shadowreaver/crypto-signal:master`
 
-You can add a secrets.json file to the app directory of your project to customize the configuration, the defaults are in app/default-config.json.
+### Configuring config.yml
 
-## How to run
-Navigate to the app directory in your terminal and run with "python app.py"
+For a list of all possible options for config.yml and some example configurations look [here](docs/config.md)
 
-# Behaviours
+# FAQ
 
-A behaviour is a functionality of the program that can be modified via the "selected\_task" value in `default-config.json`. It current accepts three values: 'default', 'rsi\_bot', 'reporter', and 'server'.
+## Common Questions
 
-## Default
+### Why does Tradingview show me different information than crypto-signal?
+There are a number of reasons why the information crypto-signal provides could be different from tradingview and the truth is we have no way to be 100% certain of why the differences exist. Below are some things that affect the indicators that _may_ differ between crypto-signal and tradingview.
 
-`"selected_task": "default"`
+- tradingview will have more historical data and for some indicators this can make a [big difference](https://ta-lib.org/d_api/ta_setunstableperiod.html).
 
-This is the default behaviour of the bot. By default, it polls Bittrex (or any other exchange you configured) and reports the price analysis of each coin pair available. This currently consists of six indicators: Breakout, RSI, SMA, EMA, Ichimoku Cloud, and MACD. More will be added in future versions.
+- tradingview uses a rolling 15 minute timeframe which means that the data they are analyzing can be more recent than ours by a factor of minutes or hours depending on what candlestick timeframe you are using.
 
-## Simple Bot
+- tradingview may collect data in a way that means the timeperiods we have may not line up with theres, which can have an effect on the analysis. This seems unlikely to us, but stranger things have happened.
 
-`"selected_task": "rsi_bot"`
-
-TODO
-
-## Reporter
-
-`"selected_task": "reporter"`
-
-TODO
-
-## Server (Backtesting)
-
-`"selected_task": "server"`
-
-Forked from the Cryptocurrency Trading Bot Tutorial on: https://youtube.com/cryptocurrencytrading
-
-This behaviour runs a flask server hosting a website allowing you to test different backtesting strategies on various sets of historical data.
-
-![Alt text](/cryptobot.jpg "The dashboard")
-
-### Installation
-
-First, clone or download the repository to your computer.
-
-**Front End**- Navigate to the *app/behaviours/ui/www* directory and run `npm install`. Make sure you have the latest version of node.js installed on your computer.
-
-**Back End**- (Without Docker) The server should run with both python 2.7.x and 3.x. The only dependencies are numpy and flask, so just do a quick `pip install flask`, `pip install numpy`.
-
-(With Docker) Everything should be installed already from the dependencies if you run `make build` in the root directory of crypto-signal.
-
-
-### Running the Application
-
-First, you'll need to use webpack to bundle all of the React .jsx files on the front end. Navigate to the *app/beahviours/ui/www* directory and run `npm run build`.
-
-(Without Docker) Next, navigate to the *app/behaviours/ui* directory and run `python server.py`.
-
-(With Docker) Run `docker-compose up` in the root directory.
-
-Now you're all set! Open up your favorite browser and navigate to http://localhost:5000/ and try it out.
-
-### How does it work?
-
-First, you'll select the coin pair you want to trade with.
-
-"Capital" is the amount of BTC you want to start out with trading.
-
-"Time Unit" is the duration of each point on the time series of historical data (1m, 5m, 30m, etc.).
-
-"Stop Loss" is the amount of BTC below each buy price that you will sell your position at. The smaller the stop loss, the less your risk.
-
-"Start Time" is the start date that your backtesting data will be grabbed from.
-
-### Strategies
-
-The middle panel on the website allows you to create customizable strategies to run over your historical data. You can choose from various indicators and select a comparision operator to compare the indicator on the left to another indicator or a number. The "value" field on the right can take either numbers (i.e. "30", "0.00034") or one of the suggested indicators from the dropdown (i.e. "RSI", "Current Price"). Any other inputs are invalid. This will be improved on in the future for better user experience.
-
-There are two buttons below the buy and sell strategy fields. Clicking on the "+" button will add another condition to your strategy. Clicking on the "-" button will remove the most recently added condition. You may add as many of these as you want. As of right now, if multiply strategy conditions are present they will be evaluated conjunctively. In other words, if your "Buy When" conditions are
-
-```
-RSI < 40
-Current Price < Moving Average (15 Period)
-```
-
-Then the bot will buy only when **both conditions are true**. The same applies for the sell conditions.
-
-### What's on the Graph?
-
-Green dots represent buy points. Red dots represent sell points. The blue line is the plot of historical closing prices, and the dotted yellow lines are Bollinger Bands. Moving averages will appear red and green, but this will be customizable later.
-
-### Coming Soon
-
-MACD plot, RSI plot
+### So if it doesn't match Tradingview how do you know your information is accurate?
+Underpinning crypto-signal for most of our technical analysis is [TA-Lib](https://ta-lib.org/index.html) which is an open source technical analysis project started in 1999. This project has been used in a rather large number of technical analysis projects over the last two decades and is one of the most trusted open source libraries for analyzing candlestick data.
 
 # Liability
-I am not your financial adviser, nor is this tool. Use this program as an educational tool, and nothing more. None of the contributors to this project are liable for any loses you may incur. Be wise and always do your own research.
+I am not your financial adviser, nor is this tool. Use this program as an educational tool, and nothing more. None of the contributors to this project are liable for any losses you may incur. Be wise and always do your own research.
